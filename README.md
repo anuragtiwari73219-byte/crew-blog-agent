@@ -20,79 +20,103 @@ No hallucinated facts. No generic filler. The researcher is forced to cite sourc
 
 ## Project Structure
 
-    crew-blog-agent/
-    ├── blog_crew.py      # Main pipeline — agents, tasks, crew definition
-    ├── .env              # API keys (not committed)
-    └── README.md
+crew-blog-agent/
+
+├── blog_crew.py      # Main pipeline — agents, tasks, crew definition
+
+├── .env              # API keys (not committed)
+
+└── README.md
 
 ## Setup
 
 **1. Clone and create virtual environment**
 
-    git clone <your-repo-url>
-    cd crew-blog-agent
-    python -m venv venv
-    venv\Scripts\activate      # Windows
-    source venv/bin/activate   # Mac/Linux
+git clone <your-repo-url>
+
+cd crew-blog-agent
+
+python -m venv venv
+
+venv\Scripts\activate      # Windows
+
+source venv/bin/activate   # Mac/Linux
 
 **2. Install dependencies**
-
-    pip install crewai crewai-tools
 
 **3. Add API keys**
 
 Create a .env file:
 
-    GROQ_API_KEY=your_groq_key_here
-    SERPER_API_KEY=your_serper_key_here
+GROQ_API_KEY=your_groq_key_here
+
+SERPER_API_KEY=your_serper_key_here
 
 Get keys from:
+
 - Groq: https://console.groq.com
 - Serper: https://serper.dev (2500 free searches/month)
 
 **4. Run**
 
-    python blog_crew.py
-
 ## How It Works
 
-    User sets topic
-          ↓
-    Research Analyst
-      → Search 1: recent statistics
-      → Search 2: companies using agentic AI
-      → Search 3: expert reports
-      → Output: 5 sourced key points
-          ↓
-    Content Writer
-      → Takes research output as context
-      → Writes 400-word blog post in markdown
-          ↓
-    Final blog post printed to terminal
+User sets topic
 
-## Bug Fixed During Development
+↓
 
-CrewAI 1.14.x injects a cache_breakpoint property into system messages for Anthropic's prompt caching feature. Groq's API rejects this field with a 400 invalid_request_error.
+Research Analyst
+
+→ Search 1: recent statistics
+
+→ Search 2: companies using agentic AI
+
+→ Search 3: expert reports
+
+→ Output: 5 sourced key points with real URLs
+
+↓
+
+Content Writer
+
+→ Takes research output as context
+
+→ Writes 400-word blog post in markdown with real clickable citations
+
+↓
+
+Final blog post printed to terminal
+
+## Bugs Fixed During Development
+
+**1. Groq rejects CrewAI's cache_breakpoint field**
+CrewAI 1.14.x injects a `cache_breakpoint` property into system messages for Anthropic's prompt caching feature. Groq's API rejects this field with a 400 invalid_request_error.
 
 Fix applied in blog_crew.py:
+```python
+import crewai.llms.cache as _crewai_cache
+_crewai_cache.mark_cache_breakpoint = lambda msg: msg
+```
+This monkey-patches the function to return the message unchanged, stripping the unsupported field before it reaches Groq's API. Tracked in CrewAI GitHub Issue #5886 (crewAIInc/crewAI#5886).
 
-    import crewai.llms.cache as _crewai_cache
-    _crewai_cache.mark_cache_breakpoint = lambda msg: msg
+**2. Groq's llama-3.3-70b-versatile intermittently fails tool calls**
+This is a known upstream Groq issue — the model occasionally returns a malformed function-call string instead of valid JSON, causing a `tool_use_failed` error. It's intermittent (same prompt can succeed or fail across runs). Mitigated with `temperature=0` and a 3-attempt automatic retry wrapper around `crew.kickoff()`.
 
-This monkey-patches the function to return the message unchanged, stripping the unsupported field before it reaches Groq's API. Tracked in CrewAI GitHub Issue #5886 (https://github.com/crewAIInc/crewAI/issues/5886).
+**3. Fake citations**
+Early versions had the writer agent invent placeholder citations like `[¹](#sourcename)` instead of real links. Fixed by forcing the researcher to capture exact URLs and the writer to use real markdown links — with a rule to avoid citing the same source multiple times in one paragraph.
 
 ## Example Output
 
 Research output (sourced):
-- 80% of engineers will need to upskill by 2027 — Carnegie Mellon University
-- 92% of IT jobs will see high/moderate AI transformation — AI-Enabled ICT Workforce Consortium
-- AI can now handle entire implementation workflows — Anthropic 2026 Agentic Coding Trends Report
+- 92% of IT jobs will see high/moderate transformation due to AI — [CIO](https://www.cio.com/article/3485322/92-of-it-jobs-will-be-transformed-by-ai.html)
+- By 2027, 80% of engineers will need to upskill due to GenAI — [CMU Bootcamps](https://bootcamps.cs.cmu.edu/blog/will-ai-replace-software-engineers-reality-check)
+- Agentic AI treats AI as an active participant in development, not just a coding tool — [David Lozzi](https://davidlozzi.com/2025/08/20/the-reality-behind-the-buzz-the-current-state-of-agentic-engineering-in-2025/)
 
-Final blog post: markdown-formatted, ~400 words, with inline source links
+Final blog post: markdown-formatted, ~400 words, with real clickable source links (no fake citations, no repeated links)
 
 ## What I'd Add Next
 
 - Save blog output to a .md file automatically
-- Add a third agent: fact-checker that rejects unsourced claims
-- Support for multiple topics via CLI argument (python blog_crew.py --topic "...")
+- Add a third agent: fact-checker that rejects unsourced or low-credibility (forum/social media) sources
+- Support for multiple topics via CLI argument (`python blog_crew.py --topic "..."`)
 - Switch to OpenAI or Claude when cache_breakpoint bug is patched upstream
