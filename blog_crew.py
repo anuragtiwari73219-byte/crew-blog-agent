@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai_tools import SerperDevTool
 
+def _get_search_tool():
+    """Return search tool based on SEARCH_PROVIDER env var ('serper' or 'tavily')."""
+    provider = os.getenv("SEARCH_PROVIDER", "serper").lower()
+    if provider == "tavily":
+        from crewai_tools import TavilySearchTool
+        return TavilySearchTool()
+    return SerperDevTool()
+
 import crewai.llms.cache as _crewai_cache
 _crewai_cache.mark_cache_breakpoint = lambda msg: msg
 
@@ -15,7 +23,7 @@ llm = LLM(
     temperature=0
 )
 
-search_tool = SerperDevTool()
+search_tool = _get_search_tool()
 
 researcher = Agent(
     role="Research Analyst",
