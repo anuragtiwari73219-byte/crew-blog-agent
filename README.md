@@ -15,7 +15,8 @@ No hallucinated facts. No generic filler. The researcher is forced to cite sourc
 
 - [CrewAI](https://github.com/crewAIInc/crewAI) — multi-agent orchestration framework
 - [Groq](https://groq.com/) — LLM inference (llama-3.3-70b-versatile)
-- [Serper](https://serper.dev/) — real-time Google Search API
+- [Serper](https://serper.dev/) — real-time Google Search API (default)
+- [Tavily](https://tavily.com/) — AI-optimized search API (optional)
 - Python 3.11
 
 ## Project Structure
@@ -52,10 +53,15 @@ GROQ_API_KEY=your_groq_key_here
 
 SERPER_API_KEY=your_serper_key_here
 
+TAVILY_API_KEY=your_tavily_key_here   # required only when using Tavily
+
+SEARCH_PROVIDER=serper                # 'serper' (default) or 'tavily'
+
 Get keys from:
 
 - Groq: https://console.groq.com
 - Serper: https://serper.dev (2500 free searches/month)
+- Tavily: https://app.tavily.com (1000 free API credits/month)
 
 **4. Run**
 
