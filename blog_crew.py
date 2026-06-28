@@ -34,7 +34,7 @@ writer = Agent(
     verbose=True
 )
 
-topic = "Why agentic AI is changing software engineering jobs"
+topic = "How small businesses can use AI agents to automate customer support"
 
 research_task = Task(
     description=f"""Search the web on this topic: {topic}
