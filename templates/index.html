@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Repo Blog Agent — Live Demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  form { margin: 24px 0; display: flex; gap: 8px; }
+  select, button { font-size: 1rem; padding: 8px; }
+  button { cursor: pointer; }
+  .note { color: #666; font-size: 0.9rem; }
+  .error { color: #b00020; }
+  .flagged { color: #b06a00; font-weight: bold; }
+  .passed { color: #0a7d33; font-weight: bold; }
+  pre { white-space: pre-wrap; background: #f6f6f6; padding: 16px; border-radius: 8px; }
+  .loading { display: none; }
+</style>
+</head>
+<body>
+  <h1>GitHub Repo → Fact-Checked Blog Post</h1>
+  <p class="note">
+    3-agent CrewAI pipeline (Technical Analyst → Content Writer → Fact Checker) runs on the
+    selected repo's README. Repo list is fixed to keep Groq free-tier usage predictable.
+  </p>
+
+  <form method="POST" onsubmit="document.getElementById('loading').style.display='block'">
+    <select name="repo" required>
+      <option value="" disabled {{ '' if selected_repo else 'selected' }}>Choose a repo…</option>
+      {% for repo in repos %}
+        <option value="{{ repo }}" {{ 'selected' if repo == selected_repo else '' }}>{{ repo }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Generate blog post</button>
+  </form>
+
+  <p id="loading" class="loading">Running the pipeline — this takes ~20-40 seconds…</p>
+
+  {% if error %}
+    <p class="error">Error: {{ error }}</p>
+  {% endif %}
+
+  {% if result %}
+    <p>
+      Fact-check verdict:
+      {% if result.flagged %}
+        <span class="flagged">FLAGGED (needs manual review)</span>
+      {% else %}
+        <span class="passed">PASSED</span>
+      {% endif %}
+    </p>
+    <h2>Blog Post</h2>
+    <pre>{{ result.blog_post }}</pre>
+    <h2>Fact-Check Report</h2>
+    <pre>{{ result.check_report }}</pre>
+  {% endif %}
+</body>
+</html>
