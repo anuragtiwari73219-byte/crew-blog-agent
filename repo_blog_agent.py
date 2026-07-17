@@ -155,6 +155,21 @@ Extract:
     return [analysis_task, write_task, check_task]
 
 
+def build_revision_task(analysis_task, write_task, check_task):
+    """Only run this if check_task's verdict was FLAGGED. Sends the
+    fact-checker's specific failed claims back to the writer to fix."""
+    return Task(
+        description="The fact-checker FLAGGED some claims in your blog post as unsupported. Rewrite the "
+                    "blog post, removing or correcting exactly the claims the fact-checker listed as "
+                    "unsupported. Keep everything else the same. Do not introduce any new claims that "
+                    "aren't in the technical analysis.",
+        expected_output="A revised ~350-word blog post in markdown format with the flagged claims "
+                        "removed or corrected, and no new unsupported claims added.",
+        agent=writer,
+        context=[analysis_task, write_task, check_task]
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate a fact-checked blog post from a GitHub repo's README")
     parser.add_argument("--repo", type=str, required=True,
@@ -175,16 +190,82 @@ def main():
     )
 
     result = crew.kickoff()
+    result_text = str(result)
 
     print("\n\n=== FINAL BLOG POST + FACT-CHECK REPORT ===\n")
-    print(result)
+    print(result_text)
+
+    analysis_task, write_task, check_task = tasks
+
+    # Gate on the fact-checker's verdict instead of saving blindly.
+    # Look at the check_task's own output specifically (not the whole
+    # crew result, which also contains the analysis and blog text and
+    # could coincidentally contain the word "FLAGGED" elsewhere).
+    check_output = str(check_task.output).upper() if check_task.output else result_text.upper()
+    flagged = "FLAGGED" in check_output
+
+    # crew.kickoff() only returns the LAST task's output (the fact-check
+    # report), not the blog post itself. Build the saved file from the
+    # actual blog post (write_task.output) plus the fact-check report,
+    # so the output file always contains the post, not just the report.
+    blog_post_text = str(write_task.output) if write_task.output else ""
+    check_report_text = str(check_task.output) if check_task.output else result_text
+
+    if flagged:
+        print("\n⚠️  Fact-check FLAGGED unsupported claims — sending back to writer for revision...")
+
+        revision_task = build_revision_task(analysis_task, write_task, check_task)
+        recheck_task = Task(
+            description="List every factual claim in the REVISED blog post. For each one, state whether "
+                        "it is directly supported by the technical analysis / README (cite which part) or "
+                        "whether it is unsupported / invented. Finish with a verdict: PASS if all claims "
+                        "are sourced, or FLAGGED if any are not, listing exactly which claims failed.",
+            expected_output="A verification report listing each claim with supported/unsupported status, "
+                            "followed by a final PASS or FLAGGED verdict.",
+            agent=fact_checker,
+            context=[analysis_task, revision_task]
+        )
+
+        revision_crew = Crew(
+            agents=[writer, fact_checker],
+            tasks=[revision_task, recheck_task],
+            process=Process.sequential,
+            verbose=True
+        )
+        revision_result = revision_crew.kickoff()
+
+        recheck_output = str(recheck_task.output).upper() if recheck_task.output else str(revision_result).upper()
+        still_flagged = "FLAGGED" in recheck_output
+
+        print("\n\n=== REVISED BLOG POST + RE-CHECK REPORT ===\n")
+        print(str(revision_result))
+
+        if still_flagged:
+            print("\n⚠️  Still FLAGGED after one revision attempt — needs manual review.")
+            flagged = True
+        else:
+            print("\n✅ Revision fixed the flagged claims — fact-check now PASSES.")
+            flagged = False
+
+        # After revision, the blog post is revision_task's output, and
+        # the fact-check report is recheck_task's output.
+        blog_post_text = str(revision_task.output) if revision_task.output else ""
+        check_report_text = str(recheck_task.output) if recheck_task.output else str(revision_result)
+    else:
+        print("\n✅ Fact-check PASSED — all claims traced to source material.")
+
+    result_text = (
+        "# Blog Post\n\n" + blog_post_text +
+        "\n\n---\n\n# Fact-Check Report\n\n" + check_report_text
+    )
 
     os.makedirs("output", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = repo_data["name"].replace("/", "_")
-    filename = f"output/{safe_name}_{timestamp}.md"
+    suffix = "_FLAGGED" if flagged else ""
+    filename = f"output/{safe_name}_{timestamp}{suffix}.md"
     with open(filename, "w", encoding="utf-8") as f:
-        f.write(str(result))
+        f.write(result_text)
 
     print(f"\nSaved to {filename}")
 
