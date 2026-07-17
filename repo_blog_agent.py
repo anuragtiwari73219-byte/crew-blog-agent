@@ -170,16 +170,13 @@ def build_revision_task(analysis_task, write_task, check_task):
     )
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate a fact-checked blog post from a GitHub repo's README")
-    parser.add_argument("--repo", type=str, required=True,
-                        help="GitHub repo as 'owner/repo' or a full URL")
-    args = parser.parse_args()
-
-    owner_repo = parse_repo(args.repo)
-    print(f"Fetching README + metadata for {owner_repo}...")
+def generate_blog_post(owner_repo: str, log=print) -> dict:
+    """Core pipeline, reusable from CLI or a web app. Returns a dict with
+    keys: blog_post, check_report, flagged, repo_data, filename."""
+    owner_repo = parse_repo(owner_repo)
+    log(f"Fetching README + metadata for {owner_repo}...")
     repo_data = fetch_repo_data(owner_repo)
-    print(f"Fetched. README length: {len(repo_data['readme'])} chars.")
+    log(f"Fetched. README length: {len(repo_data['readme'])} chars.")
 
     tasks = build_tasks(repo_data)
     crew = Crew(
@@ -192,8 +189,8 @@ def main():
     result = crew.kickoff()
     result_text = str(result)
 
-    print("\n\n=== FINAL BLOG POST + FACT-CHECK REPORT ===\n")
-    print(result_text)
+    log("\n\n=== FINAL BLOG POST + FACT-CHECK REPORT ===\n")
+    log(result_text)
 
     analysis_task, write_task, check_task = tasks
 
@@ -212,7 +209,7 @@ def main():
     check_report_text = str(check_task.output) if check_task.output else result_text
 
     if flagged:
-        print("\n⚠️  Fact-check FLAGGED unsupported claims — sending back to writer for revision...")
+        log("\n⚠️  Fact-check FLAGGED unsupported claims — sending back to writer for revision...")
 
         revision_task = build_revision_task(analysis_task, write_task, check_task)
         recheck_task = Task(
@@ -237,14 +234,14 @@ def main():
         recheck_output = str(recheck_task.output).upper() if recheck_task.output else str(revision_result).upper()
         still_flagged = "FLAGGED" in recheck_output
 
-        print("\n\n=== REVISED BLOG POST + RE-CHECK REPORT ===\n")
-        print(str(revision_result))
+        log("\n\n=== REVISED BLOG POST + RE-CHECK REPORT ===\n")
+        log(str(revision_result))
 
         if still_flagged:
-            print("\n⚠️  Still FLAGGED after one revision attempt — needs manual review.")
+            log("\n⚠️  Still FLAGGED after one revision attempt — needs manual review.")
             flagged = True
         else:
-            print("\n✅ Revision fixed the flagged claims — fact-check now PASSES.")
+            log("\n✅ Revision fixed the flagged claims — fact-check now PASSES.")
             flagged = False
 
         # After revision, the blog post is revision_task's output, and
@@ -252,7 +249,7 @@ def main():
         blog_post_text = str(revision_task.output) if revision_task.output else ""
         check_report_text = str(recheck_task.output) if recheck_task.output else str(revision_result)
     else:
-        print("\n✅ Fact-check PASSED — all claims traced to source material.")
+        log("\n✅ Fact-check PASSED — all claims traced to source material.")
 
     result_text = (
         "# Blog Post\n\n" + blog_post_text +
@@ -267,7 +264,25 @@ def main():
     with open(filename, "w", encoding="utf-8") as f:
         f.write(result_text)
 
-    print(f"\nSaved to {filename}")
+    log(f"\nSaved to {filename}")
+
+    return {
+        "owner_repo": owner_repo,
+        "repo_data": repo_data,
+        "blog_post": blog_post_text,
+        "check_report": check_report_text,
+        "flagged": flagged,
+        "full_markdown": result_text,
+        "filename": filename,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate a fact-checked blog post from a GitHub repo's README")
+    parser.add_argument("--repo", type=str, required=True,
+                        help="GitHub repo as 'owner/repo' or a full URL")
+    args = parser.parse_args()
+    generate_blog_post(args.repo)
 
 
 if __name__ == "__main__":
