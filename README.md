@@ -4,11 +4,13 @@ A multi-agent AI pipeline that fetches a GitHub repository's README and metadata
 
 ## What It Does
 
-Three AI agents work sequentially:
+Three AI agents work sequentially, with an automatic correction loop:
 
 1. **Technical Analyst** — Reads the repo's README, description, and metadata (fetched live via the GitHub API). Extracts what the project does, its tech stack, a notable technical detail, and any limitations — using only the source material, no outside knowledge.
 2. **Content Writer** — Takes the analysis and writes a ~350-word blog post introducing the project to a developer audience, using only facts from the analysis.
 3. **Fact Checker** — Cross-checks every claim in the blog post against the technical analysis and README. Flags anything invented, unsupported, or altered (including subtly changed numbers), and returns a PASS/FLAGGED verdict.
+
+**If the fact-checker flags any claim, the pipeline doesn't just report it — it acts on it.** The flagged claims are sent back to the Content Writer for a targeted rewrite, and the Fact Checker re-verifies the revised post. The saved output file is only marked `_FLAGGED` if a claim is still unresolved after that revision pass.
 
 No hallucinated facts. The fact-checker has been stress-tested against fabricated claims (invented features, invented stats, and subtly altered numbers) and consistently catches them — see `test_fact_checker.py` and `test_fact_checker_extended.py`.
 
@@ -23,9 +25,11 @@ No hallucinated facts. The fact-checker has been stress-tested against fabricate
 
 ```
 crew-blog-agent/
-├── repo_blog_agent.py              # Main pipeline — fetches repo, runs 3-agent crew
+├── repo_blog_agent.py              # Main pipeline — fetches repo, runs 3-agent crew, handles revision loop
 ├── test_fact_checker.py            # Stress test: blunt fabricated claims
 ├── test_fact_checker_extended.py   # Stress test: subtle number distortion + consistency
+├── index.md                         # GitHub Pages demo output
+├── output/                          # Timestamped .md output per run (blog post + fact-check report)
 ├── .env                             # API keys (not committed)
 └── README.md
 ```
@@ -66,6 +70,8 @@ Example:
 python repo_blog_agent.py --repo anuragtiwari73219-byte/ai-email-triage-agent
 ```
 
+Output is saved to `output/<repo-name>_<timestamp>.md` (or `..._FLAGGED.md` if a claim was still unresolved after revision), containing both the blog post and the fact-check report.
+
 ## How It Works
 
 ```
@@ -83,9 +89,18 @@ Content Writer
 Fact Checker
   → Lists every claim in the blog post
   → Marks each SUPPORTED (cites source) or UNSUPPORTED/INVENTED
-  → Final verdict: PASS or FLAGGED
+  → Verdict: PASS or FLAGGED
       ↓
-Final blog post + verification report printed to terminal
+   FLAGGED? ──── yes ───→ Content Writer revises the flagged claims only
+      │                          ↓
+      │                    Fact Checker re-checks the revision
+      │                          ↓
+      no                   PASS or still FLAGGED
+      │                          │
+      └──────────────┬───────────┘
+                      ↓
+     Blog post + fact-check report saved to output/
+     (filename suffixed _FLAGGED only if still unresolved)
 ```
 
 ## Fact-Checker Validation
@@ -97,7 +112,9 @@ Because a fact-checker that never flags anything isn't a real safeguard, it was 
   - Subtle distortion: a real accuracy stat quietly changed (93%→99%, 9→12 categories). Result: caught, correctly FLAGGED.
   - Consistency: same fabricated-claims test run 3x. Result: FLAGGED all 3 times, same claims named each time.
 
-This is a small sample (4 runs across 2 fabrication styles), not a comprehensive audit — but it confirms the fact-checker does real verification rather than rubber-stamping every post as PASS.
+Beyond that stress test, the full pipeline (not just the checker in isolation) has also been run end-to-end against real repos and produced a genuine FLAGGED verdict on an unsupported claim, which the revision loop then corrected on re-check — confirming the checker, the revision step, and the save-gating logic all work together, not just the checker alone.
+
+This is a small sample, not a comprehensive audit — but it confirms the fact-checker does real verification rather than rubber-stamping every post as PASS.
 
 ## Bugs Fixed During Development
 
@@ -117,8 +134,14 @@ Known upstream Groq issue — the model occasionally returns a malformed functio
 **3. GitHub API description/README mismatches**
 When a repo's GitHub description hasn't been updated to match its README (e.g. after a tech-stack migration), the analyst agent can pull stale/conflicting info. Worth double-checking the target repo's description is current before running.
 
+**4. Fact-checker verdict was computed but never acted on**
+Originally, the PASS/FLAGGED verdict was printed to the terminal but had no effect on the saved output — a FLAGGED post was saved exactly like a PASSed one, so the fact-checking step was cosmetic rather than a real safeguard. Fixed by gating the save on the verdict: FLAGGED now triggers a revision task (Content Writer rewrites the specific failed claims, Fact Checker re-checks), and the output filename is only suffixed `_FLAGGED` if it's still unresolved after that.
+
+**5. Saved output only ever contained the fact-check report, never the blog post**
+`crew.kickoff()` returns only the *last* task's output — in this pipeline, that's the Fact Checker's report, not the Content Writer's blog post. Every saved `.md` file was silently missing the actual blog post. Fixed by explicitly pulling `write_task.output` (or `revision_task.output` after a revision) alongside the fact-check report when building the saved file.
+
 ## What I'd Add Next
 
-- Save blog output + fact-check report to a `.md` file automatically
 - Broaden fact-checker stress tests beyond number/feature fabrication (e.g. wrong attribution, misleading paraphrase)
 - Batch mode — generate posts for multiple repos in one run
+- Cap the revision loop to more than one retry, with a hard stop and manual-review flag if still FLAGGED after N attempts
