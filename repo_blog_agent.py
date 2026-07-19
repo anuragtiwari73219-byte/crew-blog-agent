@@ -21,16 +21,23 @@ llm = LLM(
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # optional, but strongly recommended (60/hr -> 5000/hr)
 
 
-def _kickoff_with_retry(crew, max_retries=3, base_delay=3):
-    """Retries crew.kickoff() on Groq rate-limit errors with exponential backoff."""
-    for attempt in range(max_retries):
+def _kickoff_with_retry(crew, max_retries=1, wait_seconds=65):
+    """Retries crew.kickoff() on Groq rate-limit errors.
+
+    Only retries ONCE, waiting long enough for Groq's per-minute token
+    window to clear (not a short exponential backoff) -- because retrying
+    re-runs the WHOLE pipeline from task 1, which burns fresh tokens on
+    every attempt. A quick retry can make a near-limit failure worse, not
+    better, since it stacks new usage on top of usage that hasn't expired
+    from the rolling window yet.
+    """
+    for attempt in range(max_retries + 1):
         try:
             return crew.kickoff()
         except Exception as exc:
             is_rate_limit = "RateLimitError" in type(exc).__name__ or "rate_limit" in str(exc).lower()
-            if is_rate_limit and attempt < max_retries - 1:
-                wait = base_delay * (2 ** attempt)
-                time.sleep(wait)
+            if is_rate_limit and attempt < max_retries:
+                time.sleep(wait_seconds)
                 continue
             raise
 
@@ -77,7 +84,7 @@ def fetch_repo_data(owner_repo: str) -> dict:
         "language": meta.get("language") or "",
         "topics": meta.get("topics", []),
         "stars": meta.get("stargazers_count", 0),
-        "readme": readme_text[:6000],  # cap to keep prompt size reasonable
+        "readme": readme_text[:3000],  # cap to keep prompt size well under the Groq free-tier TPM budget
     }
 
 
