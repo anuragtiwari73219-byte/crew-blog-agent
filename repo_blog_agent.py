@@ -1,6 +1,7 @@
 import os
 import re
 import argparse
+import time
 from datetime import datetime
 
 import requests
@@ -18,6 +19,20 @@ llm = LLM(
 )
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # optional, but strongly recommended (60/hr -> 5000/hr)
+
+
+def _kickoff_with_retry(crew, max_retries=3, base_delay=3):
+    """Retries crew.kickoff() on Groq rate-limit errors with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return crew.kickoff()
+        except Exception as exc:
+            is_rate_limit = "RateLimitError" in type(exc).__name__ or "rate_limit" in str(exc).lower()
+            if is_rate_limit and attempt < max_retries - 1:
+                wait = base_delay * (2 ** attempt)
+                time.sleep(wait)
+                continue
+            raise
 
 
 def parse_repo(repo_arg: str) -> str:
@@ -186,7 +201,7 @@ def generate_blog_post(owner_repo: str, log=print) -> dict:
         verbose=True
     )
 
-    result = crew.kickoff()
+    result = _kickoff_with_retry(crew)
     result_text = str(result)
 
     log("\n\n=== FINAL BLOG POST + FACT-CHECK REPORT ===\n")
@@ -229,7 +244,7 @@ def generate_blog_post(owner_repo: str, log=print) -> dict:
             process=Process.sequential,
             verbose=True
         )
-        revision_result = revision_crew.kickoff()
+        revision_result = _kickoff_with_retry(revision_crew)
 
         recheck_output = str(recheck_task.output).upper() if recheck_task.output else str(revision_result).upper()
         still_flagged = "FLAGGED" in recheck_output
